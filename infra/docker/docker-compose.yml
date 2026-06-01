@@ -1,0 +1,136 @@
+# ============================================================
+# Longkedin — Base Infrastructure Services
+# Usage: docker compose -f docker-compose.yml up -d
+# ============================================================
+version: "3.9"
+
+services:
+  # --- PostgreSQL 16 + pgvector ---
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: longkedin-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: longkedin
+      POSTGRES_PASSWORD: longkedin
+      POSTGRES_DB: longkedin
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U longkedin -d longkedin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - longkedin-net
+
+  # --- Redis 7 ---
+  redis:
+    image: redis:7-alpine
+    container_name: longkedin-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - longkedin-net
+
+  # --- RabbitMQ 3.13 with Management ---
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: longkedin-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: longkedin
+      RABBITMQ_DEFAULT_PASS: longkedin
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - longkedin-net
+
+  # --- MinIO (S3-compatible) ---
+  minio:
+    image: minio/minio:latest
+    container_name: longkedin-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"    # S3 API
+      - "9001:9001"    # Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - longkedin-net
+
+  # --- Create MinIO Buckets ---
+  minio-init:
+    image: minio/mc:latest
+    container_name: longkedin-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/longkedin-resumes;
+      mc mb --ignore-existing local/longkedin-recordings;
+      mc anonymous set download local/longkedin-resumes;
+      echo 'MinIO buckets initialized';
+      "
+    networks:
+      - longkedin-net
+
+  # --- Jaeger (Distributed Tracing) ---
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: longkedin-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+    networks:
+      - longkedin-net
+
+networks:
+  longkedin-net:
+    driver: bridge
+    name: longkedin-net
+
+volumes:
+  postgres_data:
+    name: longkedin-postgres-data
+  redis_data:
+    name: longkedin-redis-data
+  rabbitmq_data:
+    name: longkedin-rabbitmq-data
+  minio_data:
+    name: longkedin-minio-data

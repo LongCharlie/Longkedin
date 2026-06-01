@@ -1,0 +1,16 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "prisma.prisma",
+    "bradlc.vscode-tailwindcss",
+    "usernamehw.errorlens",
+    "eamodio.gitlens",
+    "ms-azuretools.vscode-docker",
+    "hashicorp.terraform",
+    "rangav.vscode-thunder-client",
+    "ms-python.python",
+    "charliermarsh.ruff"
+  ],
+  "unwantedRecommendations": []
+}

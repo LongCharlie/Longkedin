@@ -1,0 +1,118 @@
+# ============================================================
+# Longkedin — Deploy to Production
+# Trigger: Merge to main (with manual approval gate)
+# ============================================================
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Manual trigger for rollback
+
+env:
+  AWS_REGION: us-east-1
+  ENVIRONMENT: production
+
+jobs:
+  # ── Terraform Apply (Production) ─────────────
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://longkedin.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7"
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infra/terraform
+        run: |
+          terraform plan \
+            -var="environment=production" \
+            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="mq_password=${{ secrets.MQ_PASSWORD }}" \
+            -out=tfplan
+
+      - name: Terraform Apply (Blue/Green)
+        working-directory: infra/terraform
+        run: terraform apply -auto-approve tfplan
+
+  # ── Health Check ─────────────────────────────
+  health-check:
+    name: Post-Deploy Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [deploy]
+    steps:
+      - name: Wait for service stabilization
+        run: sleep 60
+
+      - name: Health Check (Retry 5x)
+        run: |
+          for i in {1..5}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://longkedin.com/api/rest/health)
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "⚠️ Health check attempt $i failed (status $STATUS), retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ Health check failed after 5 attempts"
+          exit 1
+
+      - name: Notify Slack (Success)
+        if: success()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "🚀 Production deployment successful!\nCommit: ${{ github.sha }}\nURL: https://longkedin.com"
+            }
+
+      - name: Notify Slack (Failure)
+        if: failure()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "🚨 Production deployment FAILED!\nCommit: ${{ github.sha }}\nCheck: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+
+  # ── Create Sentry Release ────────────────────
+  sentry-release:
+    name: Create Sentry Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [health-check]
+    if: success()
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Sentry Release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: longkedin-api
+        with:
+          environment: production
+          version: ${{ github.sha }}

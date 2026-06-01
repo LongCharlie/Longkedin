@@ -1,0 +1,448 @@
+// ============================================================
+// Longkedin — Prisma Schema
+// 核心数据模型：User → Resume → Application → Interview
+// ============================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector", schema: "extensions"), pgcrypto, pg_trgm]
+}
+
+// ============================================================
+// Extensions & Custom Types
+// ============================================================
+
+// pgvector extension (in separate schema for clean management)
+// CREATE EXTENSION IF NOT EXISTS vector SCHEMA extensions;
+
+enum ApplicationStatus {
+  SAVED
+  APPLIED
+  PHONE_SCREEN
+  TECHNICAL_INTERVIEW
+  ONSITE
+  OFFER
+  ACCEPTED
+  DECLINED
+  NEGOTIATING
+  REJECTED
+  WITHDRAWN
+}
+
+enum InterviewType {
+  BEHAVIORAL
+  TECHNICAL
+  SYSTEM_DESIGN
+  CASE_STUDY
+  MIXED
+}
+
+enum InterviewDifficulty {
+  ENTRY
+  MID
+  SENIOR
+  STAFF
+}
+
+enum ResumeStatus {
+  UPLOADING
+  PENDING
+  PARSING
+  PARSED
+  PARSE_FAILED
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  PUSH
+}
+
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+  PRO
+}
+
+// ============================================================
+// User & Auth
+// ============================================================
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  emailVerified DateTime?
+  name         String?
+  avatarUrl    String?
+
+  // OAuth accounts
+  accounts Account[]
+
+  // Profile
+  profile       UserProfile?
+  targetRole    String?   // 目标职位，如 "Frontend Engineer"
+  targetLevel   String?   // ENTRY / MID / SENIOR
+  targetIndustry String?  // 目标行业
+
+  // Billing
+  subscriptionTier SubscriptionTier @default(FREE)
+  subscriptionEnd  DateTime?
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime? // Soft delete
+
+  // Relations
+  resumes       Resume[]
+  applications  Application[]
+  interviews    Interview[]
+  notifications Notification[]
+  activityLogs  ActivityLog[]
+  apiKeys       ApiKey[]
+
+  @@index([email])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String  // oauth, credentials
+  provider          String  // google, github
+  providerAccountId String
+  refreshToken      String?
+  accessToken       String?
+  expiresAt         Int?
+  tokenType         String?
+  scope             String?
+  idToken           String?
+  sessionState      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model UserProfile {
+  id        String @id @default(cuid())
+  userId    String @unique
+
+  phone        String?  // Encrypted at application level
+  location     String?
+  linkedinUrl  String?
+  githubUrl    String?
+  portfolioUrl String?
+  yearsOfExp   Float?
+  currentCompany String?
+  currentTitle   String?
+  bio            String?  @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+// ============================================================
+// Resume & Parsing
+// ============================================================
+
+model Resume {
+  id        String       @id @default(cuid())
+  userId    String
+  version   Int          @default(1)
+  status    ResumeStatus @default(UPLOADING)
+
+  // File metadata
+  fileName     String
+  fileSize     Int?        // bytes
+  fileType     String?     // pdf, docx
+  s3Key        String?     // S3 object key
+  s3Url        String?     // Presigned URL (temporary)
+
+  // Parsed content (from Worker A)
+  rawText       String?  @db.Text
+  parsedData    Json?    // Structured: { skills[], experiences[], education[] }
+  embedding     Unsupported("vector(1536)")?  // pgvector: OpenAI text-embedding-3-small
+
+  // Parsing metadata
+  parsedAt      DateTime?
+  parseError    String?  @db.Text
+
+  // Themes & templates for rich text editor
+  template      String?  @default("minimal")  // minimal, modern, professional
+  themeColors   Json?
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@unique([userId, version])
+  @@index([userId, status])
+  @@index([deletedAt])
+  @@map("resumes")
+}
+
+// ============================================================
+// Job Aggregation
+// ============================================================
+
+model Job {
+  id          String @id @default(cuid())
+  source      String @default("manual")  // manual, linkedin, indeed, csv_import
+  sourceUrl   String?
+  sourceId    String?   // External ID for dedup
+
+  // Job details
+  title       String
+  company     String
+  location    String?
+  remote      Boolean  @default(false)
+  description String?  @db.Text  // Full JD text
+  requirements String? @db.Text  // Extracted requirements
+  salaryMin   Int?
+  salaryMax   Int?
+  salaryCurrency String? @default("USD")
+
+  // Metadata
+  postedAt    DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean  @default(true)
+
+  // AI enrichment (from Worker A)
+  enrichedData Json?    // Standardized skills, level, industry
+  embedding    Unsupported("vector(1536)")?
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications Application[]
+
+  @@index([title, company])
+  @@index([source, sourceId])
+  @@index([isActive])
+  @@map("jobs")
+}
+
+// ============================================================
+// Application (Core State Machine)
+// ============================================================
+
+model Application {
+  id          String            @id @default(cuid())
+  userId      String
+  jobId       String
+  resumeId    String
+  status      ApplicationStatus @default(SAVED)
+
+  // State machine audit
+  statusChangedAt DateTime?
+  statusChangedBy String?   // User ID or "system"
+
+  // Idempotency
+  idempotencyKey String? @unique
+
+  // Application metadata
+  appliedAt   DateTime?
+  notes       String?  @db.Text
+  contactName String?
+  contactEmail String?
+
+  // Offer details (when status = OFFER)
+  offerSalary    Int?
+  offerEquity    String?
+  offerStartDate DateTime?
+  offerNotes     String?  @db.Text
+
+  // Rejection info (when status = REJECTED)
+  rejectionReason String?
+
+  // AI Match result (cached from Worker B)
+  matchScore    Int?       // 0-100
+  matchData     Json?      // { missingSkills[], suggestions[], coverLetter }
+  matchAnalyzedAt DateTime?
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job      Job       @relation(fields: [jobId], references: [id])
+  resume   Resume    @relation(fields: [resumeId], references: [id])
+
+  interviews       Interview[]
+  statusHistory    StatusHistory[]
+  notificationLogs NotificationLog[]
+
+  @@index([userId, status])
+  @@index([userId, jobId])
+  @@index([idempotencyKey])
+  @@map("applications")
+}
+
+model StatusHistory {
+  id            String            @id @default(cuid())
+  applicationId String
+  fromStatus    ApplicationStatus
+  toStatus      ApplicationStatus
+  changedBy     String            // User ID
+  metadata      Json?
+  createdAt     DateTime          @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+  @@map("status_history")
+}
+
+// ============================================================
+// Interview
+// ============================================================
+
+model Interview {
+  id           String             @id @default(cuid())
+  userId       String
+  applicationId String?
+
+  // Configuration
+  type         InterviewType      @default(BEHAVIORAL)
+  difficulty   InterviewDifficulty @default(ENTRY)
+  focusAreas   String[]           // e.g., ["STAR", "leadership", "conflict-resolution"]
+  maxQuestions Int                @default(5)
+
+  // Session state
+  status       String             @default("PENDING")  // PENDING, IN_PROGRESS, COMPLETED, ABANDONED
+  startedAt    DateTime?
+  completedAt  DateTime?
+
+  // Recording
+  recordingS3Key  String?
+  transcript      String?  @db.Text  // Full transcript (from Worker C)
+  transcriptData  Json?              // Structured: { segments: [{ speaker, text, start, end }] }
+
+  // AI Feedback (from Worker C)
+  overallScore     Int?       // 0-100
+  starScore        Int?       // STAR framework match 0-100
+  paceScore        Int?       // Speaking pace 0-100
+  fillerWordCount  Int?
+  feedbackJson     Json?      // Detailed feedback per question
+
+  // Audit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id])
+
+  @@index([userId, status])
+  @@map("interviews")
+}
+
+// ============================================================
+// Notification System
+// ============================================================
+
+model Notification {
+  id        String             @id @default(cuid())
+  userId    String
+  channel   NotificationChannel @default(IN_APP)
+  type      String             // e.g., "application.status_changed", "interview.reminder"
+  title     String
+  body      String?  @db.Text
+  data      Json?              // Action link, metadata
+  isRead    Boolean            @default(false)
+  readAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model NotificationLog {
+  id            String  @id @default(cuid())
+  applicationId String
+  eventType     String  // e.g., "status_changed", "interview_scheduled"
+  channel       NotificationChannel
+  sentAt        DateTime @default(now())
+  status        String  // SENT, FAILED, BOUNCED
+  error         String? @db.Text
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, sentAt])
+  @@map("notification_logs")
+}
+
+// ============================================================
+// Analytics & Audit
+// ============================================================
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String   // e.g., "resume.upload", "application.create", "interview.start"
+  resource  String?  // e.g., "resume:xxx", "application:xxx"
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("activity_logs")
+}
+
+model ApiKey {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String   // e.g., "CLI Tool", "Zapier Integration"
+  key        String   @unique // Hashed
+  prefix     String   // First 8 chars for display
+  scopes     String[] // e.g., ["read:jobs", "write:applications"]
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([key])
+  @@map("api_keys")
+}
+
+// ============================================================
+// Seed Data (Optional)
+// ============================================================
+
+// Industry Skills Reference (for RAG matching)
+model SkillReference {
+  id       String @id @default(cuid())
+  category String // e.g., "frontend", "backend", "data-science"
+  role     String // e.g., "Frontend Engineer"
+  level    String // ENTRY, MID, SENIOR
+  skills   Json   // { required: [...], preferred: [...], niceToHave: [...] }
+
+  @@index([category, role, level])
+  @@map("skill_references")
+}

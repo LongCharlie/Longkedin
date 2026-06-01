@@ -1,0 +1,150 @@
+# ============================================================
+# Longkedin — Development Overlay
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# ============================================================
+version: "3.9"
+
+services:
+  # --- Next.js Web (Dev Mode, Hot Reload) ---
+  web:
+    build:
+      context: ../../
+      dockerfile: apps/web/Dockerfile.dev
+    container_name: longkedin-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: dev-secret-change-in-prod
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../apps/web:/app/apps/web
+      - ../../packages:/app/packages
+      - /app/node_modules
+      - /app/apps/web/.next
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - longkedin-net
+
+  # --- NestJS API (Dev Mode, Hot Reload) ---
+  api:
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile.dev
+    container_name: longkedin-api
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://longkedin:longkedin@postgres:5432/longkedin?schema=public
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://longkedin:longkedin@rabbitmq:5672
+      S3_ENDPOINT: http://minio:9000
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../apps/api:/app/apps/api
+      - ../../packages:/app/packages
+      - /app/node_modules
+      - /app/apps/api/dist
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/rest/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - longkedin-net
+
+  # --- Worker A: Resume/JD Parser ---
+  worker-resume:
+    build:
+      context: ../../
+      dockerfile: apps/workers/worker_resume/Dockerfile.dev
+    container_name: longkedin-worker-resume
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://longkedin:longkedin@postgres:5432/longkedin?schema=public
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://longkedin:longkedin@rabbitmq:5672
+      S3_ENDPOINT: http://minio:9000
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../apps/workers:/app/apps/workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - longkedin-net
+
+  # --- Worker B: Match & Gap Analyzer ---
+  worker-match:
+    build:
+      context: ../../
+      dockerfile: apps/workers/worker_match/Dockerfile.dev
+    container_name: longkedin-worker-match
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql://longkedin:longkedin@postgres:5432/longkedin?schema=public
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://longkedin:longkedin@rabbitmq:5672
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../apps/workers:/app/apps/workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - longkedin-net
+
+  # --- Worker C: Interview Simulator ---
+  worker-interview:
+    build:
+      context: ../../
+      dockerfile: apps/workers/worker_interview/Dockerfile.dev
+    container_name: longkedin-worker-interview
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    environment:
+      DATABASE_URL: postgresql://longkedin:longkedin@postgres:5432/longkedin?schema=public
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://longkedin:longkedin@rabbitmq:5672
+      S3_ENDPOINT: http://minio:9000
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+    env_file:
+      - ../../.env
+    volumes:
+      - ../../apps/workers:/app/apps/workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - longkedin-net

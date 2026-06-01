@@ -1,0 +1,121 @@
+# ============================================================
+# Longkedin — Production Overlay
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ============================================================
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: ../../
+      dockerfile: apps/web/Dockerfile
+      args:
+        BUILD_ENV: production
+    container_name: longkedin-web
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+    env_file:
+      - ../../.env.production
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - longkedin-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+
+  api:
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile
+      args:
+        BUILD_ENV: production
+    container_name: longkedin-api
+    restart: always
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+    env_file:
+      - ../../.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/rest/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - longkedin-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "1G"
+
+  worker-resume:
+    build:
+      context: ../../
+      dockerfile: apps/workers/worker_resume/Dockerfile
+    container_name: longkedin-worker-resume
+    restart: always
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    env_file:
+      - ../../.env.production
+    networks:
+      - longkedin-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "2G"
+
+  worker-match:
+    build:
+      context: ../../
+      dockerfile: apps/workers/worker_match/Dockerfile
+    container_name: longkedin-worker-match
+    restart: always
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    env_file:
+      - ../../.env.production
+    networks:
+      - longkedin-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "1G"
+
+  worker-interview:
+    build:
+      context: ../../
+      dockerfile: apps/workers/worker_interview/Dockerfile
+    container_name: longkedin-worker-interview
+    restart: always
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+    env_file:
+      - ../../.env.production
+    networks:
+      - longkedin-net
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "4G"

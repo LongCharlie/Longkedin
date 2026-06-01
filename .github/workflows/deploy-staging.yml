@@ -1,0 +1,160 @@
+# ============================================================
+# Longkedin — Deploy to Staging
+# Trigger: Merge to develop
+# ============================================================
+name: Deploy Staging
+
+on:
+  push:
+    branches: [develop]
+
+env:
+  AWS_REGION: us-east-1
+  ENVIRONMENT: staging
+
+jobs:
+  # ── Run Integration Tests ────────────────────
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: longkedin
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: longkedin_test
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports:
+          - 5672:5672
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: "9"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm db:push
+        env:
+          DATABASE_URL: postgresql://longkedin:test@localhost:5432/longkedin_test?schema=public
+      - run: pnpm test:int
+        env:
+          DATABASE_URL: postgresql://longkedin:test@localhost:5432/longkedin_test?schema=public
+          REDIS_URL: redis://localhost:6379/0
+          RABBITMQ_URL: amqp://guest:guest@localhost:5672
+
+  # ── Terraform Apply (Staging) ────────────────
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [integration-tests]
+    environment:
+      name: staging
+      url: https://staging.longkedin.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7"
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infra/terraform
+        run: |
+          terraform plan \
+            -var="environment=staging" \
+            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="mq_password=${{ secrets.MQ_PASSWORD }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: infra/terraform
+        run: terraform apply -auto-approve tfplan
+
+  # ── E2E Tests ────────────────────────────────
+  e2e:
+    name: E2E Tests (Staging)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [deploy]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: "9"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run E2E Tests
+        working-directory: apps/web
+        run: npx playwright test --config=playwright.config.ts
+        env:
+          PLAYWRIGHT_BASE_URL: https://staging.longkedin.com
+          TEST_USER_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+  # ── Health Check ─────────────────────────────
+  health-check:
+    name: Post-Deploy Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [deploy]
+    steps:
+      - name: Wait for service stabilization
+        run: sleep 30
+
+      - name: Check API Health
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://staging.longkedin.com/api/rest/health)
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check failed with status $STATUS"
+            exit 1
+          fi
+          echo "Health check passed"
+
+      - name: Notify Slack (Success)
+        if: success()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "✅ Staging deployment successful!\nCommit: ${{ github.sha }}\nURL: https://staging.longkedin.com"
+            }

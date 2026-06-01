@@ -1,0 +1,9 @@
+﻿技术方向,美国市场主流要求（FAANG/Mid-size/Startup）,本项目实现
+Frontend,React + TypeScript + Next.js (App Router) + Tailwind + State Mgmt (Zustand/Redux),100% 对齐，支持 SSR/SSG、SEO、PWA 离线缓存
+Backend,Node.js/NestJS 或 Python FastAPI + REST/GraphQL + tRPC/Prisma,NestJS 主控 + tRPC 强类型契约，Prisma 管理 DB
+Database,PostgreSQL + Redis + 对象存储 (S3/R2),关系型业务数据 + Redis 缓存/会话/限流 + S3 存储录音/简历
+Async/Queue,Kafka/RabbitMQ/SQS + Worker 模式,RabbitMQ（或 AWS SQS）处理 AI 任务、邮件解析、通知推送
+AI/LLM,OpenAI/Anthropic API + LangChain/LlamaIndex + RAG + Voice AI,简历解析、JD 匹配、模拟面试、邮件生成、语音转写
+Cloud/Infra,AWS/GCP + Docker + Terraform + GitHub Actions CI/CD,容器化部署 + IaC 管理 + 自动化测试/蓝绿发布
+Observability,OpenTelemetry + Prometheus/Grafana + Sentry + ELK,全链路 Trace、业务指标、错误追踪、日志聚合
+Security/Compliance,OAuth2/OIDC + JWT + RBAC + AES-256 + Rate Limiting + CSP,多租户隔离、敏感数据加密、GDPR/CCPA 合规设计
