@@ -50,7 +50,7 @@ export const resumeRouter = router({
     .input(
       z.object({
         fileName: z.string().min(1).max(255),
-        fileType: z.enum(["pdf", "docx"]),
+        fileType: z.enum(["pdf"]),
         fileSize: z
           .number()
           .int()
@@ -58,14 +58,17 @@ export const resumeRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const existingCount = await ctx.prisma.resume.count({
-        where: { userId: ctx.user!.id, deletedAt: null },
+      // Find max version to avoid unique constraint conflict
+      const maxV = await ctx.prisma.resume.aggregate({
+        where: { userId: ctx.user!.id },
+        _max: { version: true },
       });
+      const nextVersion = (maxV._max.version || 0) + 1;
 
       const resume = await ctx.prisma.resume.create({
         data: {
           userId: ctx.user!.id,
-          version: existingCount + 1,
+          version: nextVersion,
           status: "UPLOADING",
           fileName: input.fileName,
           fileType: input.fileType,

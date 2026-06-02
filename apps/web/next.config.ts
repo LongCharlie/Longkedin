@@ -27,6 +27,10 @@ const nextConfig: NextConfig = {
         source: "/api/trpc/:path*",
         destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/trpc/:path*`,
       },
+      {
+        source: "/api/rest/files/:path*",
+        destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/rest/files/:path*`,
+      },
     ];
   },
 

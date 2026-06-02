@@ -1,62 +1,43 @@
-# ============================================================
-# Longkedin — Python AI Workers (Shared Configuration)
-# ============================================================
-from pydantic_settings import BaseSettings
-from pydantic import Field
+"""Settings — loads .env from project root, no heavy deps."""
+
+import os
+from dotenv import load_dotenv
+
+# Load .env from monorepo root (3 levels up from shared/)
+_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv(os.path.join(_root, ".env"))
 
 
-class Settings(BaseSettings):
-    """Shared settings for all AI Workers."""
-
-    # --- Database ---
-    database_url: str = Field(
-        default="postgresql+asyncpg://longkedin:longkedin@localhost:5432/longkedin",
-        alias="DATABASE_URL",
+class Settings:
+    db = os.getenv(
+        "DATABASE_URL", "postgresql://longkedin:longkedin@localhost:5432/longkedin"
     )
+    redis = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    rabbitmq = os.getenv("RABBITMQ_URL", "amqp://longkedin:longkedin@localhost:5672")
+    s3_endpoint = os.getenv("S3_ENDPOINT", "http://localhost:9000")
+    s3_access = os.getenv("S3_ACCESS_KEY", "minioadmin")
+    s3_secret = os.getenv("S3_SECRET_KEY", "minioadmin")
+    s3_bucket = os.getenv("S3_BUCKET_RESUMES", "longkedin-resumes")
+    s3_region = os.getenv("S3_REGION", "us-east-1")
 
-    # --- Redis ---
-    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    # DeepSeek
+    ds_key = os.getenv("DEEPSEEK_API_KEY", "")
+    ds_base = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    ds_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-    # --- RabbitMQ ---
-    rabbitmq_url: str = Field(
-        default="amqp://longkedin:longkedin@localhost:5672", alias="RABBITMQ_URL"
-    )
+    # OpenAI (embedding only)
+    oai_key = os.getenv("OPENAI_API_KEY", "")
+    oai_emb = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
-    # --- S3 / MinIO ---
-    s3_endpoint: str = Field(default="http://localhost:9000", alias="S3_ENDPOINT")
-    s3_access_key: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")
-    s3_secret_key: str = Field(default="minioadmin", alias="S3_SECRET_KEY")
-    s3_bucket_resumes: str = Field(default="longkedin-resumes", alias="S3_BUCKET_RESUMES")
-    s3_bucket_recordings: str = Field(
-        default="longkedin-recordings", alias="S3_BUCKET_RECORDINGS"
-    )
-    s3_region: str = Field(default="us-east-1", alias="S3_REGION")
+    log_level = os.getenv("LOG_LEVEL", "INFO")
 
-    # --- OpenAI ---
-    openai_api_key: str = Field(alias="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-4o", alias="OPENAI_MODEL")
-    openai_embedding_model: str = Field(
-        default="text-embedding-3-small", alias="OPENAI_EMBEDDING_MODEL"
-    )
+    @classmethod
+    def has_ai(cls) -> bool:
+        return bool(cls.ds_key) and len(cls.ds_key) > 10
 
-    # --- Optional: ElevenLabs TTS ---
-    elevenlabs_api_key: str | None = Field(default=None, alias="ELEVENLABS_API_KEY")
-
-    # --- Observability ---
-    otel_exporter_otlp_endpoint: str = Field(
-        default="http://localhost:4318", alias="OTEL_EXPORTER_OTLP_ENDPOINT"
-    )
-    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
-
-    # --- Worker ---
-    worker_name: str = "shared"
-    max_retries: int = 3
-
-    model_config = {
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "extra": "ignore",
-    }
+    @classmethod
+    def has_emb(cls) -> bool:
+        return bool(cls.oai_key) and len(cls.oai_key) > 10
 
 
 settings = Settings()

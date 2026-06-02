@@ -1,100 +1,76 @@
-# ============================================================
-# Worker A — OpenAI integration (embedding + structured extraction)
-# ============================================================
+"""DeepSeek AI integration + OpenAI embedding (optional)."""
+
 import json
 import logging
-from typing import Optional
-
 from shared.config import settings
-from shared.parser_utils import SKILL_KEYWORDS, extract_skills
+from shared.parser_utils import rule_based_extraction, extract_skills
 
 logger = logging.getLogger(__name__)
 
-# ---- OpenAI Client (lazy init) ----
-_openai_client = None
+_ds_client = None
+_oai_client = None
 
 
-def get_openai_client():
-    global _openai_client
-    if _openai_client is None:
-        if not settings.openai_api_key or settings.openai_api_key.startswith("sk-***"):
-            logger.warning("OPENAI_API_KEY not set — AI features disabled")
-            return None
+def _get_ds():
+    global _ds_client
+    if _ds_client is None and settings.has_ai():
         import openai
 
-        _openai_client = openai.OpenAI(api_key=settings.openai_api_key)
-    return _openai_client
+        _ds_client = openai.OpenAI(api_key=settings.ds_key, base_url=settings.ds_base)
+    return _ds_client
 
 
-# ---- Embedding ----
-async def generate_embedding(text: str) -> Optional[list[float]]:
-    """Generate a vector embedding using OpenAI text-embedding-3-small."""
-    client = get_openai_client()
+def _get_oai():
+    global _oai_client
+    if _oai_client is None and settings.has_emb():
+        import openai
+
+        _oai_client = openai.OpenAI(api_key=settings.oai_key)
+    return _oai_client
+
+
+async def generate_embedding(text: str) -> list[float] | None:
+    """Generate embedding via OpenAI (DeepSeek has no embedding API)."""
+    client = _get_oai()
     if client is None:
-        logger.warning("Skipping embedding — no OpenAI client")
         return None
-
     try:
-        response = client.embeddings.create(
-            model=settings.openai_embedding_model,
-            input=text[:8000],  # Max 8191 tokens
-        )
-        return response.data[0].embedding
+        r = client.embeddings.create(model=settings.oai_emb, input=text[:8000])
+        return r.data[0].embedding
     except Exception as e:
-        logger.error(f"Embedding failed: {e}")
+        logger.warning(f"Embedding failed: {e}")
         return None
 
 
-# ---- Structured Extraction (GPT-4o-mini) ----
 async def extract_resume_entities(text: str) -> dict:
-    """
-    Use GPT-4o-mini to extract structured data from resume text.
-    Falls back to rule-based extraction if API is unavailable.
-    """
-    client = get_openai_client()
+    """Use DeepSeek to extract structured resume data. Falls back to rules."""
+    client = _get_ds()
     if client is None:
-        return _rule_based_extraction(text)
+        return rule_based_extraction(text)
 
-    prompt = f"""Extract structured information from this resume. Return ONLY valid JSON.
+    prompt = f"""Extract structured information from this resume. Return ONLY valid JSON (no markdown, no explanation).
 
 {{
-  "name": "Full name",
-  "email": "email@example.com",
-  "skills": ["skill1", "skill2", ...],
-  "experiences": [
-    {{
-      "company": "Company name",
-      "title": "Job title",
-      "startDate": "YYYY-MM",
-      "endDate": "YYYY-MM or 'Present'",
-      "highlights": ["achievement 1", ...]
-    }}
-  ],
-  "education": [
-    {{
-      "school": "University name",
-      "degree": "Degree",
-      "field": "Field of study",
-      "graduationYear": "YYYY"
-    }}
-  ],
-  "yearsOfExperience": number,
-  "summary": "One-paragraph professional summary"
+  "name": "Full name or null",
+  "email": "email or null",
+  "skills": ["skill1", "skill2"],
+  "experiences": [{{"company": "...", "title": "...", "startDate": "YYYY-MM", "endDate": "YYYY-MM or Present", "highlights": ["..."]}}],
+  "education": [{{"school": "...", "degree": "...", "field": "...", "graduationYear": "YYYY"}}],
+  "yearsOfExperience": number or null,
+  "summary": "one paragraph"
 }}
 
-Resume text:
-{text[:6000]}
-"""
+Resume:
+{text[:6000]}"""
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        r = client.chat.completions.create(
+            model=settings.ds_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=2000,
         )
-        content = response.choices[0].message.content or "{}"
-        # Try to parse JSON (handle markdown code fences)
+        content = r.choices[0].message.content or "{}"
         content = content.strip()
         if content.startswith("```"):
             content = content.split("```")[1]
@@ -102,56 +78,39 @@ Resume text:
                 content = content[4:]
         return json.loads(content)
     except Exception as e:
-        logger.warning(f"GPT extraction failed, falling back to rules: {e}")
-        return _rule_based_extraction(text)
+        logger.warning(f"DeepSeek extraction failed, using rules: {e}")
+        return rule_based_extraction(text)
 
 
-def _rule_based_extraction(text: str) -> dict:
-    """Rule-based fallback when OpenAI is unavailable."""
-    from shared.parser_utils import extract_email, extract_phone, summarize_experience
-
-    return {
-        "name": None,
-        "email": extract_email(text),
-        "phone": extract_phone(text),
-        "skills": extract_skills(text),
-        "experiences": [],
-        "education": [],
-        "yearsOfExperience": None,
-        "summary": summarize_experience(text)[:500],
-    }
-
-
-# ---- JD Parsing ----
 async def parse_job_description(text: str) -> dict:
-    """Parse a job description to extract structured requirements."""
-    client = get_openai_client()
+    """Use DeepSeek to parse a JD."""
+    client = _get_ds()
     if client is None:
-        return _rule_based_jd_parse(text)
+        return {
+            "title": None,
+            "requiredSkills": extract_skills(text),
+            "preferredSkills": [],
+            "level": "MID",
+            "locationType": None,
+            "salaryRange": None,
+            "summary": text[:500],
+        }
 
-    prompt = f"""Extract structured requirements from this job description. Return ONLY valid JSON.
+    prompt = f"""Extract structured info from this job description. Return ONLY valid JSON.
 
-{{
-  "title": "Job title",
-  "requiredSkills": ["skill1", ...],
-  "preferredSkills": ["skill1", ...],
-  "level": "ENTRY | MID | SENIOR | STAFF",
-  "locationType": "REMOTE | HYBRID | ONSITE",
-  "salaryRange": {{ "min": number, "max": number, "currency": "USD" }} or null,
-  "summary": "One-paragraph job summary"
-}}
+{{"title":"...","requiredSkills":["..."],"preferredSkills":["..."],"level":"ENTRY|MID|SENIOR|STAFF","locationType":"REMOTE|HYBRID|ONSITE","salaryRange":{{"min":n,"max":n,"currency":"USD"}}|null,"summary":"..."}}
 
-Job description:
-{text[:6000]}
-"""
+JD:
+{text[:6000]}"""
+
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        r = client.chat.completions.create(
+            model=settings.ds_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=1500,
         )
-        content = response.choices[0].message.content or "{}"
+        content = r.choices[0].message.content or "{}"
         content = content.strip()
         if content.startswith("```"):
             content = content.split("```")[1]
@@ -159,17 +118,13 @@ Job description:
                 content = content[4:]
         return json.loads(content)
     except Exception as e:
-        logger.warning(f"JD parsing failed: {e}")
-        return _rule_based_jd_parse(text)
-
-
-def _rule_based_jd_parse(text: str) -> dict:
-    return {
-        "title": None,
-        "requiredSkills": extract_skills(text),
-        "preferredSkills": [],
-        "level": "MID",
-        "locationType": None,
-        "salaryRange": None,
-        "summary": text[:500],
-    }
+        logger.warning(f"DeepSeek JD parse failed: {e}")
+        return {
+            "title": None,
+            "requiredSkills": extract_skills(text),
+            "preferredSkills": [],
+            "level": "MID",
+            "locationType": None,
+            "salaryRange": None,
+            "summary": text[:500],
+        }

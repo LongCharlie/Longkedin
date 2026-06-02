@@ -62,3 +62,8 @@ models/
 # Uploads (local dev)
 uploads/
 storage/
+
+# Document
+*.pdf   
+*.docx
+

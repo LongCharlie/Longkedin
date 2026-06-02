@@ -13,6 +13,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { HealthModule } from "./modules/health/health.module";
 import { TrpcModule } from "./trpc/trpc.module";
 import { IdempotencyModule } from "./common/idempotency/idempotency.module";
+import { UploadModule } from "./modules/upload/upload.module";
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { IdempotencyModule } from "./common/idempotency/idempotency.module";
     // ---- Feature modules ----
     AuthModule,
     HealthModule,
+    UploadModule,
 
     // ---- tRPC (registered last to collect all routers) ----
     TrpcModule,

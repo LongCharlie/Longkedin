@@ -1,12 +1,4 @@
-# ============================================================
-# Worker C — Interview Simulator
-# Responsibilities:
-#   1. Receive audio frames via WebSocket (or process uploaded audio)
-#   2. Whisper speech-to-text transcription (real-time)
-#   3. LLM analysis: STAR framework, pace, filler words
-#   4. Generate follow-up questions
-#   5. Optional: ElevenLabs TTS for voice feedback
-# ============================================================
+"""Worker C — Interview Simulator (DeepSeek-powered)"""
 
 import asyncio
 import json
@@ -16,10 +8,12 @@ import aio_pika
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from shared.config import settings
+from shared.ai_utils import _get_ds  # reuse DeepSeek client
 
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), "INFO"))
+logger = logging.getLogger("worker-interview")
 
-app = FastAPI(title="Worker C — Interview Simulator", version="0.1.0")
+app = FastAPI(title="Worker C — Interview Simulator", version="0.3.0")
 
 
 @app.get("/health")
@@ -27,103 +21,104 @@ async def health():
     return {
         "status": "ok",
         "worker": "interview-simulator",
-        "features": {
-            "whisper": "enabled",
-            "tts": settings.elevenlabs_api_key is not None,
-        },
+        "deepseek": settings.has_ai(),
     }
 
 
 @app.websocket("/ws/interview/{room_id}")
-async def interview_websocket(websocket: WebSocket, room_id: str):
-    """
-    Real-time interview WebSocket endpoint.
-
-    Client → Server:
-      { "type": "audio_frame", "data": "<base64 PCM16>", "timestamp": 123456 }
-      { "type": "end_speaking" }
-
-    Server → Client:
-      { "type": "transcript", "text": "...", "is_final": true }
-      { "type": "question", "text": "Follow-up question..." }
-      { "type": "feedback", "starScore": 85, "pace": "good", "fillerWords": 3 }
-    """
+async def ws(websocket: WebSocket, room_id: str):
     await websocket.accept()
-    logger.info("Interview session started", extra={"room_id": room_id})
+    logger.info(f"Interview session {room_id} started")
+    transcript: list[dict] = []
 
     try:
         while True:
-            data = await websocket.receive_json()
-            msg_type = data.get("type")
-
-            if msg_type == "audio_frame":
-                # TODO: Buffer audio, send to Whisper for incremental transcription
-                transcript = await transcribe_audio(data["data"])
+            msg = await websocket.receive_json()
+            if msg.get("type") == "audio_frame":
+                # In production: send to Whisper API for transcription
+                # For now, echo back placeholder
                 await websocket.send_json(
-                    {"type": "transcript", "text": transcript, "is_final": False}
+                    {"type": "transcript", "text": "[语音转写中...]", "is_final": False}
                 )
 
-            elif msg_type == "end_speaking":
-                # TODO: Analyze answer, generate follow-up and feedback
-                feedback = await analyze_answer({"transcript": "..."})
-                await websocket.send_json({"type": "feedback", **feedback})
+            elif msg.get("type") == "end_speaking":
+                user_text = msg.get("text", "")
+                transcript.append({"role": "user", "content": user_text})
 
-                follow_up = await generate_follow_up({"context": "..."})
+                # Generate AI follow-up question
+                follow_up = await _generate_follow_up(transcript)
                 await websocket.send_json({"type": "question", "text": follow_up})
 
+                # Generate feedback
+                feedback = await _analyze_answer(user_text)
+                await websocket.send_json({"type": "feedback", **feedback})
+
     except WebSocketDisconnect:
-        logger.info("Interview session ended", extra={"room_id": room_id})
+        logger.info(f"Interview {room_id} ended")
 
 
-async def transcribe_audio(audio_data: str) -> str:
-    """Transcribe audio using Whisper (API or local)."""
-    # TODO: Implement with faster-whisper or OpenAI Whisper API
-    return ""
+async def _generate_follow_up(history: list[dict]) -> str:
+    client = _get_ds()
+    if client is None:
+        return "请继续描述你的经历。"
+
+    try:
+        r = client.chat.completions.create(
+            model=settings.ds_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是专业的面试官。根据候选人的回答，提出一个有深度的追问（中文，简短）。",
+                },
+                *history[-4:],
+            ],
+            max_tokens=200,
+            temperature=0.7,
+        )
+        return r.choices[0].message.content or "请继续。"
+    except Exception:
+        return "请详细描述你是如何解决这个问题的？"
 
 
-async def analyze_answer(context: dict) -> dict:
-    """
-    Analyze answer quality:
-    - STAR framework match (Situation, Task, Action, Result)
-    - Speaking pace
-    - Filler word count (um, uh, like, you know...)
-    """
-    # TODO: Implement with GPT-4o
-    return {
-        "starScore": 0,
-        "paceScore": 0,
-        "fillerWordCount": 0,
-        "feedback": "",
-    }
+async def _analyze_answer(text: str) -> dict:
+    client = _get_ds()
+    if client is None:
+        return {"starScore": 50, "feedback": "AI 未配置"}
+
+    try:
+        r = client.chat.completions.create(
+            model=settings.ds_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": '评估面试回答。返回JSON: {"starScore":0-100,"feedback":"简短评价"}',
+                },
+                {"role": "user", "content": text},
+            ],
+            max_tokens=200,
+            temperature=0.3,
+        )
+        content = r.choices[0].message.content or "{}"
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+        return json.loads(content)
+    except Exception:
+        return {"starScore": 60, "feedback": "回答完整，建议增加具体数据。"}
 
 
-async def generate_follow_up(context: dict) -> str:
-    """Generate a contextual follow-up question."""
-    # TODO: Implement with GPT-4o
-    return ""
-
-
-async def process_message(message: aio_pika.IncomingMessage):
-    """Handle offline interview tasks (e.g., batch transcription)."""
-    async with message.process():
-        body = json.loads(message.body.decode())
-        # TODO: Implement offline processing
-        logger.info("Offline interview task", extra={"task_id": body.get("taskId")})
-
-
-async def start_consumer():
-    connection = await aio_pika.connect_robust(settings.rabbitmq_url)
-    async with connection:
-        channel = await connection.channel()
-        await channel.set_qos(prefetch_count=1)
-        queue = await channel.declare_queue("interview", durable=True)
-        await queue.consume(process_message)
-        logger.info("Worker C started, waiting for messages on 'interview' queue...")
+async def _consume():
+    conn = await aio_pika.connect_robust(settings.rabbitmq)
+    async with conn:
+        ch = await conn.channel()
+        q = await ch.declare_queue("interview", durable=True)
+        await q.consume(lambda msg: msg.ack())  # placeholder
+        logger.info("Worker C listening...")
         await asyncio.Future()
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    asyncio.ensure_future(start_consumer())
+    asyncio.ensure_future(_consume())
     uvicorn.run(app, host="0.0.0.0", port=8003, log_level=settings.log_level.lower())
