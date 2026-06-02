@@ -270,16 +270,10 @@ erDiagram
 
 ---
 
-## 🤝 贡献指南
+## 贡献指南
 
 1. Fork 本仓库
 2. 创建功能分支: `feat/LLK-XXX-description`
 3. 遵循 [Conventional Commits](https://www.conventionalcommits.org/)
 4. 确保 lint + test 通过
 5. 提交 PR 到 `develop` 分支
-
----
-
-## 📄 License
-
-MIT © Longkedin Team
