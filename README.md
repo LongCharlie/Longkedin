@@ -1,4 +1,4 @@
-# 🎯 Longkedin — 智能求职全链路工作台
+# Longkedin — 智能求职全链路工作台
 
 > AI-Powered Job Search Full-Link Workbench
 >
@@ -6,22 +6,22 @@
 
 ---
 
-## 💡 解决什么问题？
+## 解决什么问题？
 
 留学生与初级工程师求职时面临的 4 大痛点：
 
-| 痛点 | 现状 | Longkedin 方案 |
-|------|------|---------------|
-| 📋 **信息碎片化** | 岗位散落 LinkedIn/Indeed/官网，Excel 手动追踪 | 多源聚合 + Kanban 看板 + 智能状态机 |
-| 📝 **简历匹配低效** | 每次手动改关键词，不知差距在哪 | AI 向量匹配 + 缺失技能分析 + 自动建议 |
-| 🎤 **面试准备盲目** | 靠刷题网站，无个性化反馈 | 语音面试舱 + STAR 框架评分 + 转写复盘 |
-| 📊 **跟进复盘缺失** | Offer 对比靠感觉，错过最佳窗口 | 时间线管理 + 转化漏斗 + 拒信分析 |
+| 痛点             | 现状                                          | Longkedin 方案                        |
+| ---------------- | --------------------------------------------- | ------------------------------------- |
+| **信息碎片化**   | 岗位散落 LinkedIn/Indeed/官网，Excel 手动追踪 | 多源聚合 + Kanban 看板 + 智能状态机   |
+| **简历匹配低效** | 每次手动改关键词，不知差距在哪                | AI 向量匹配 + 缺失技能分析 + 自动建议 |
+| **面试准备盲目** | 靠刷题网站，无个性化反馈                      | 语音面试舱 + STAR 框架评分 + 转写复盘 |
+| **跟进复盘缺失** | Offer 对比靠感觉，错过最佳窗口                | 时间线管理 + 转化漏斗 + 拒信分析      |
 
-**核心价值**：申请转化率提升 20%~35%，每周节省 5~10 小时。
+**核心价值**：申请转化率提升，每周节省可节省大量时间投简历。
 
 ---
 
-## 🏗️ 技术架构
+## 技术架构
 
 ```mermaid
 graph TB
@@ -74,20 +74,20 @@ graph TB
     style OAI fill:#412991,color:#fff
 ```
 
-### 技术栈 (与 Stack.csv 100% 对齐)
+### 技术栈
 
-| 层级 | 选型 | 理由 |
-|------|------|------|
-| **Frontend** | React 19 + TypeScript + Next.js 15 (App Router) + Tailwind + Zustand | SSR/SSG/SEO + PWA 离线缓存 |
-| **Backend** | NestJS 11 + tRPC + Prisma + PostgreSQL | 端到端类型安全 + 企业级模块化 |
-| **AI Workers** | Python FastAPI + LangChain + Celery + RabbitMQ | Python AI 生态 + 异步解耦 |
-| **Infra** | Docker + Terraform + AWS (ECS Fargate / RDS / S3 / CloudFront) | 容器化 + IaC + 蓝绿部署 |
-| **Observability** | OpenTelemetry + Prometheus/Grafana + Sentry + ELK | 全链路 Trace + 告警 |
-| **Security** | NextAuth (OAuth2/OIDC) + JWT + RBAC + AES-256 + Rate Limiting | 多租户 + GDPR/CCPA 合规 |
+| 层级              | 选型                                                                 | 理由                          |
+| ----------------- | -------------------------------------------------------------------- | ----------------------------- |
+| **Frontend**      | React 19 + TypeScript + Next.js 15 (App Router) + Tailwind + Zustand | SSR/SSG/SEO + PWA 离线缓存    |
+| **Backend**       | NestJS 11 + tRPC + Prisma + PostgreSQL                               | 端到端类型安全 + 企业级模块化 |
+| **AI Workers**    | Python FastAPI + LangChain + Celery + RabbitMQ                       | Python AI 生态 + 异步解耦     |
+| **Infra**         | Docker + Terraform + AWS (ECS Fargate / RDS / S3 / CloudFront)       | 容器化 + IaC + 蓝绿部署       |
+| **Observability** | OpenTelemetry + Prometheus/Grafana + Sentry + ELK                    | 全链路 Trace + 告警           |
+| **Security**      | NextAuth (OAuth2/OIDC) + JWT + RBAC + AES-256 + Rate Limiting        | 多租户 + GDPR/CCPA 合规       |
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
 ```bash
 # 1. 克隆项目
@@ -110,13 +110,13 @@ pnpm db:generate && pnpm db:push && pnpm db:seed
 pnpm dev
 ```
 
-| 服务 | URL |
-|------|-----|
-| Web 前端 | http://localhost:3000 |
-| tRPC Playground | http://localhost:4000/api/trpc-playground |
-| RabbitMQ Dashboard | http://localhost:15672 |
-| MinIO Console | http://localhost:9001 |
-| Jaeger UI | http://localhost:16686 |
+| 服务               | URL                                       |
+| ------------------ | ----------------------------------------- |
+| Web 前端           | http://localhost:3000                     |
+| tRPC Playground    | http://localhost:4000/api/trpc-playground |
+| RabbitMQ Dashboard | http://localhost:15672                    |
+| MinIO Console      | http://localhost:9001                     |
+| Jaeger UI          | http://localhost:16686                    |
 
 详细开发指南见 [DEVELOPMENT.md](./docs/DEVELOPMENT.md)
 
@@ -246,27 +246,27 @@ erDiagram
 
 ## 🗺️ MVP 路线图
 
-| Phase | 内容 | 预计 |
-|-------|------|------|
-| **Phase 0** ✅ | 项目骨架搭建 (monorepo, lint, CI, Docker) | 当前 |
-| **Phase 1** | 用户认证 + 简历上传 + AI 解析 (Worker A) | 2 周 |
-| **Phase 2** | 岗位管理 + 申请状态机 + Kanban 看板 | 2 周 |
-| **Phase 3** | AI 匹配分析 + Cover Letter 生成 (Worker B) | 2 周 |
-| **Phase 4** | 语音面试舱 + AI 反馈 (Worker C) | 3 周 |
-| **Phase 5** | Analytics Dashboard + 邮件通知 | 1 周 |
-| **Phase 6** | 性能优化 + 安全审计 + 生产部署 | 1 周 |
+| Phase       | 内容                                       | 状态   |
+| ----------- | ------------------------------------------ | ------ |
+| **Phase 0** | 项目骨架搭建 (monorepo, lint, CI, Docker)  | 当前   |
+| **Phase 1** | 用户认证 + 简历上传 + AI 解析 (Worker A)   | 未完成 |
+| **Phase 2** | 岗位管理 + 申请状态机 + Kanban 看板        | 未完成 |
+| **Phase 3** | AI 匹配分析 + Cover Letter 生成 (Worker B) | 未完成 |
+| **Phase 4** | 语音面试舱 + AI 反馈 (Worker C)            | 未完成 |
+| **Phase 5** | Analytics Dashboard + 邮件通知             | 未完成 |
+| **Phase 6** | 性能优化 + 安全审计 + 生产部署             | 未完成 |
 
 ---
 
 ## 📖 文档索引
 
-| 文档 | 内容 |
-|------|------|
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 架构全景、ADR 决策、安全设计、可观测性 |
-| [DEVELOPMENT.md](./docs/DEVELOPMENT.md) | 环境搭建、代码规范、Git 工作流、FAQ |
-| [API.md](./docs/API.md) | tRPC 路由、REST 端点、WebSocket、MQ 协议 |
-| [DEPLOYMENT.md](./docs/DEPLOYMENT.md) | CI/CD Pipeline、Docker Compose、AWS Terraform |
-| [schema.prisma](./apps/api/prisma/schema.prisma) | 完整数据模型 (10+ models, pgvector) |
+| 文档                                             | 内容                                          |
+| ------------------------------------------------ | --------------------------------------------- |
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md)        | 架构全景、ADR 决策、安全设计、可观测性        |
+| [DEVELOPMENT.md](./docs/DEVELOPMENT.md)          | 环境搭建、代码规范、Git 工作流、FAQ           |
+| [API.md](./docs/API.md)                          | tRPC 路由、REST 端点、WebSocket、MQ 协议      |
+| [DEPLOYMENT.md](./docs/DEPLOYMENT.md)            | CI/CD Pipeline、Docker Compose、AWS Terraform |
+| [schema.prisma](./apps/api/prisma/schema.prisma) | 完整数据模型 (10+ models, pgvector)           |
 
 ---
 
