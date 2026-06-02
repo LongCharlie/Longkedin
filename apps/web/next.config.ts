@@ -20,6 +20,16 @@ const nextConfig: NextConfig = {
   // ---- External packages for server components ----
   serverExternalPackages: ["@trpc/server"],
 
+  // ---- API Proxy (dev: forward tRPC to NestJS backend) ----
+  async rewrites() {
+    return [
+      {
+        source: "/api/trpc/:path*",
+        destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/trpc/:path*`,
+      },
+    ];
+  },
+
   // ---- Redirects ----
   async redirects() {
     return [
